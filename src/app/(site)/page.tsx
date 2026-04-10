@@ -8,6 +8,7 @@ import { compactNumber, formatDate, movementLabel } from "@/lib/utils";
 
 export default async function HomePage() {
   const data = await getHomeData();
+  const featuredMaps = [data.featuredMaps.fe2, data.featuredMaps.tria].filter(Boolean);
 
   return (
     <div className="page-shell space-y-10">
@@ -18,13 +19,13 @@ export default async function HomePage() {
           </Badge>
           <div className="space-y-4">
             <h1 className="max-w-3xl text-5xl font-semibold tracking-tight text-slate-50 md:text-6xl">
-              Track the hardest fictional FE2CM and TRIA.os maps in one serious,
-              data-first hub.
+              Launch a serious FE2CM and TRIA.os list with stable map IDs,
+              staff-managed moderation, and production-ready workflows.
             </h1>
             <p className="max-w-2xl text-lg text-slate-300">
-              Browse active and legacy lists, submit proof-backed completions, inspect
-              player score ladders, and run a moderation workflow built for competitive
-              community lists.
+              The roster starts empty by design. Staff can add the first maps,
+              publish placements, and grow the leaderboard without shipping fake
+              starter data.
             </p>
           </div>
           <div className="flex flex-wrap gap-3">
@@ -35,7 +36,7 @@ export default async function HomePage() {
               <Link href="/submit-record">Submit Record</Link>
             </Button>
             <Button asChild variant="outline">
-              <Link href="/submit-map">Submit Map</Link>
+              <Link href="/admin/maps">Manage Maps</Link>
             </Button>
           </div>
         </div>
@@ -59,29 +60,48 @@ export default async function HomePage() {
       </section>
 
       <section className="section-grid">
-        {[data.featuredMaps.fe2, data.featuredMaps.tria].map((map) => (
-          <Card key={map.slug} className="p-6">
-            <div className="mb-5 flex items-center justify-between">
-              <Badge>{map.gameType} #1</Badge>
-              <span className="text-sm text-slate-400">
-                Difficulty {map.difficultyScore.toFixed(1)}
-              </span>
-            </div>
-            <h2 className="text-3xl font-semibold text-slate-50">{map.name}</h2>
-            <p className="mt-2 text-sm text-slate-400">{map.creators.join(", ")}</p>
-            <p className="mt-5 max-w-xl text-slate-300">{map.description}</p>
-            <div className="mt-5 flex flex-wrap gap-2">
-              {map.tags.map((tag) => (
-                <Badge key={tag}>{tag}</Badge>
-              ))}
-            </div>
+        {featuredMaps.length ? (
+          featuredMaps.map((map) => (
+            <Card key={map.mapCode} className="p-6">
+              <div className="mb-5 flex items-center justify-between">
+                <Badge>{map.gameType} #1</Badge>
+                <span className="text-sm text-slate-400">
+                  {map.mapCode} • {map.difficultyScore.toFixed(2)} {map.difficultyLabel}
+                </span>
+              </div>
+              <h2 className="text-3xl font-semibold text-slate-50">{map.name}</h2>
+              <p className="mt-2 text-sm text-slate-400">{map.creators.join(", ")}</p>
+              <p className="mt-5 max-w-xl text-slate-300">{map.description}</p>
+              <div className="mt-5 flex flex-wrap gap-2">
+                {map.tags.map((tag) => (
+                  <Badge key={tag}>{tag}</Badge>
+                ))}
+              </div>
+              <div className="mt-6">
+                <Button asChild variant="ghost">
+                  <Link href={`/maps/${map.mapCode}`}>Open map profile</Link>
+                </Button>
+              </div>
+            </Card>
+          ))
+        ) : (
+          <Card className="p-8 lg:col-span-2">
+            <Badge>Launch state</Badge>
+            <h2 className="mt-5 text-3xl font-semibold text-slate-50">
+              The rankings open with an empty roster
+            </h2>
+            <p className="mt-4 max-w-2xl text-slate-300">
+              Moderators and admins can add the first FE2CM and TRIA.os maps
+              from the admin dashboard. Featured placements and recent list
+              movement will appear automatically once the roster is populated.
+            </p>
             <div className="mt-6">
               <Button asChild variant="ghost">
-                <Link href={`/maps/${map.slug}`}>Open map profile</Link>
+                <Link href="/admin/maps">Open map management</Link>
               </Button>
             </div>
           </Card>
-        ))}
+        )}
       </section>
 
       <section className="section-grid">
@@ -90,26 +110,32 @@ export default async function HomePage() {
             Latest accepted records
           </p>
           <div className="mt-5 space-y-4">
-            {data.latestRecords.map((record) => (
-              <div
-                key={record.id}
-                className="flex items-center justify-between gap-4 rounded-3xl border border-white/8 bg-white/[0.03] px-4 py-4"
-              >
-                <div>
-                  <p className="font-medium text-slate-50">
-                    {record.playerName} on {record.mapName}
-                  </p>
-                  <p className="text-sm text-slate-400">
-                    {record.isCompletion ? "Completion" : `${record.percent}% progress`} •{" "}
-                    {record.gameType}
-                  </p>
+            {data.latestRecords.length ? (
+              data.latestRecords.map((record) => (
+                <div
+                  key={record.id}
+                  className="flex items-center justify-between gap-4 rounded-3xl border border-white/8 bg-white/[0.03] px-4 py-4"
+                >
+                  <div>
+                    <p className="font-medium text-slate-50">
+                      {record.playerName} on {record.mapName}
+                    </p>
+                    <p className="text-sm text-slate-400">
+                      {record.isCompletion ? "Completion" : `${record.percent}% progress`} •{" "}
+                      {record.gameType}
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <p className="font-medium text-cyan-200">{record.pointsAwarded} pts</p>
+                    <p className="text-xs text-slate-500">{formatDate(record.createdAt)}</p>
+                  </div>
                 </div>
-                <div className="text-right">
-                  <p className="font-medium text-cyan-200">{record.pointsAwarded} pts</p>
-                  <p className="text-xs text-slate-500">{formatDate(record.createdAt)}</p>
-                </div>
+              ))
+            ) : (
+              <div className="rounded-3xl border border-dashed border-white/10 bg-white/[0.03] px-4 py-8 text-center text-slate-400">
+                No accepted records yet.
               </div>
-            ))}
+            )}
           </div>
         </Card>
 
@@ -119,17 +145,24 @@ export default async function HomePage() {
               Recent list changes
             </p>
             <div className="mt-5 space-y-4">
-              {data.latestChanges.map((change) => (
-                <div
-                  key={`${change.mapSlug}-${change.updatedAt}`}
-                  className="rounded-3xl border border-white/8 bg-white/[0.03] px-4 py-4"
-                >
-                  <p className="font-medium text-slate-50">{change.mapName}</p>
-                  <p className="mt-1 text-sm text-slate-400">
-                    {movementLabel(change.movement)} • {formatDate(change.updatedAt)}
-                  </p>
+              {data.latestChanges.length ? (
+                data.latestChanges.map((change) => (
+                  <div
+                    key={`${change.mapCode}-${change.updatedAt}`}
+                    className="rounded-3xl border border-white/8 bg-white/[0.03] px-4 py-4"
+                  >
+                    <p className="font-medium text-slate-50">{change.mapName}</p>
+                    <p className="mt-1 text-sm text-slate-400">
+                      {change.mapCode} • {movementLabel(change.movement)} •{" "}
+                      {formatDate(change.updatedAt)}
+                    </p>
+                  </div>
+                ))
+              ) : (
+                <div className="rounded-3xl border border-dashed border-white/10 bg-white/[0.03] px-4 py-8 text-center text-slate-400">
+                  No map movement yet.
                 </div>
-              ))}
+              )}
             </div>
           </Card>
 

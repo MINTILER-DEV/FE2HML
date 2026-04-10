@@ -25,6 +25,23 @@ export function RankingTable({
   maps: MapView[];
   showPlacement?: boolean;
 }) {
+  if (!maps.length) {
+    return (
+      <Card className="p-10 text-center">
+        <p className="text-sm uppercase tracking-[0.2em] text-cyan-300">
+          Empty roster
+        </p>
+        <h2 className="mt-4 text-3xl font-semibold text-slate-50">
+          No maps have been added yet
+        </h2>
+        <p className="mx-auto mt-3 max-w-2xl text-slate-400">
+          Moderators and admins can create the first entries from the map
+          management dashboard.
+        </p>
+      </Card>
+    );
+  }
+
   return (
     <Card className="overflow-hidden">
       <div className="overflow-x-auto">
@@ -52,7 +69,7 @@ export function RankingTable({
                 </td>
                 <td className="px-5 py-5">
                   <Link
-                    href={`/maps/${map.slug}`}
+                    href={`/maps/${map.mapCode}`}
                     className="block rounded-2xl transition hover:bg-white/[0.03]"
                   >
                     <div className="mb-2 flex items-center gap-3">
@@ -62,7 +79,7 @@ export function RankingTable({
                       <div>
                         <p className="font-semibold text-slate-50">{map.name}</p>
                         <p className="text-xs text-slate-400">
-                          {map.creators.join(", ")}
+                          {map.mapCode} • {map.creators.join(", ")}
                         </p>
                       </div>
                     </div>
@@ -80,7 +97,10 @@ export function RankingTable({
                   <Badge className="text-cyan-100">{map.gameType}</Badge>
                 </td>
                 <td className="px-5 py-5 font-medium text-slate-50">
-                  {map.difficultyScore.toFixed(1)}
+                  <div className="space-y-1">
+                    <p>{map.difficultyScore.toFixed(2)}</p>
+                    <p className="text-xs text-slate-500">{map.difficultyLabel}</p>
+                  </div>
                 </td>
                 <td className="px-5 py-5">
                   <div className="space-y-1">

@@ -5,12 +5,14 @@ export type Role = "USER" | "MODERATOR" | "ADMIN";
 
 export type MapView = {
   id: string;
+  mapCode: string;
   slug: string;
   name: string;
   gameType: GameType;
   status: MapStatus;
   placement: number | null;
   difficultyScore: number;
+  difficultyLabel: string;
   creators: string[];
   shortDescription: string;
   description: string;
@@ -32,7 +34,7 @@ export type RecordView = {
   id: string;
   playerSlug: string;
   playerName: string;
-  mapSlug: string;
+  mapCode: string;
   mapName: string;
   gameType: GameType;
   percent: number;
@@ -50,7 +52,7 @@ export type PlayerView = {
   slug: string;
   username: string;
   totalPoints: number;
-  hardestMapSlug: string;
+  hardestMapCode?: string;
   hardestMapName: string;
   totalAcceptedRecords: number;
   fe2RecordCount: number;
@@ -76,6 +78,7 @@ export type PendingRecordView = {
 
 export type PendingMapView = {
   id: string;
+  proposedMapCode?: string;
   name: string;
   gameType: GameType;
   creatorText: string;
@@ -99,5 +102,5 @@ export type SnapshotView = {
   title: string;
   summary: string;
   capturedAt: string;
-  leaders: { placement: number; mapName: string; mapSlug: string; gameType: GameType }[];
+  leaders: { placement: number; mapName: string; mapCode: string; gameType: GameType }[];
 };

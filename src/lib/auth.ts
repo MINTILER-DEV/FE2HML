@@ -37,6 +37,7 @@ const useDatabase = Boolean(process.env.DATABASE_URL);
 
 export const authOptions: NextAuthOptions = {
   adapter: useDatabase ? PrismaAdapter(prisma) : undefined,
+  secret: process.env.NEXTAUTH_SECRET,
   session: {
     strategy: "jwt",
   },

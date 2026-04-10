@@ -25,10 +25,10 @@ export default async function HistoryPage() {
             <div className="mt-5 space-y-3">
               {snapshot.leaders.map((leader) => (
                 <div
-                  key={`${snapshot.id}-${leader.mapSlug}`}
+                  key={`${snapshot.id}-${leader.mapCode}`}
                   className="rounded-2xl bg-white/[0.03] px-4 py-3 text-sm text-slate-300"
                 >
-                  #{leader.placement} {leader.mapName} ({leader.gameType})
+                  #{leader.placement} {leader.mapName} [{leader.mapCode}] ({leader.gameType})
                 </div>
               ))}
             </div>

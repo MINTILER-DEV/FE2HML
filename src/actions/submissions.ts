@@ -1,18 +1,26 @@
 "use server";
 
+import { type Prisma, type PrismaClient } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
 import { getAuthSession } from "@/lib/auth";
+import {
+  getDifficultyLabel,
+  normalizeDifficultyScore,
+} from "@/lib/difficulty";
 import { prisma } from "@/lib/prisma";
 import { computeRecordPoints } from "@/lib/scoring";
 import { buildProofDomainSet, parseCsv, slugify } from "@/lib/utils";
 import {
+  managedMapSchema,
   mapSubmissionSchema,
   recordSubmissionSchema,
 } from "@/lib/validators/submission";
 
 const useDatabase = Boolean(process.env.DATABASE_URL);
+
+type Tx = Prisma.TransactionClient | PrismaClient;
 
 function getBooleanValue(formData: FormData, key: string) {
   const value = formData.get(key);
@@ -32,6 +40,107 @@ function assertAllowedProofDomain(urlString: string) {
 
   if (!isAllowed) {
     throw new Error("That proof domain is not on the allowed list.");
+  }
+}
+
+async function requireStaffSession(callbackUrl: string) {
+  const session = await getAuthSession();
+
+  if (!session?.user || !["MODERATOR", "ADMIN"].includes(session.user.role)) {
+    redirect(`/login?callbackUrl=${encodeURIComponent(callbackUrl)}`);
+  }
+
+  return session;
+}
+
+async function ensureTags(tx: Tx, labels: string[]) {
+  const ids: string[] = [];
+
+  for (const label of labels) {
+    const slug = slugify(label);
+    const tag = await tx.tag.upsert({
+      where: { slug },
+      update: { label },
+      create: {
+        slug,
+        label,
+        category: ["solo", "team"].includes(label.toLowerCase())
+          ? "format"
+          : "skillset",
+      },
+    });
+
+    ids.push(tag.id);
+  }
+
+  return ids;
+}
+
+async function getNextMapCode(tx: Tx, gameType: "FE2" | "TRIA") {
+  const prefix = `${gameType}-`;
+  const existing = await tx.map.findMany({
+    where: {
+      gameType,
+      mapCode: {
+        startsWith: prefix,
+      },
+    },
+    select: { mapCode: true },
+  });
+
+  const maxValue = existing.reduce((max, map) => {
+    const match = map.mapCode.match(/-(\d+)$/);
+    const numericValue = match ? Number(match[1]) : 0;
+    return Math.max(max, numericValue);
+  }, 0);
+
+  return `${prefix}${String(maxValue + 1).padStart(4, "0")}`;
+}
+
+async function syncMapRelations(
+  tx: Tx,
+  mapId: string,
+  creatorText: string,
+  tagsText?: string,
+) {
+  const creators = parseCsv(creatorText);
+  const tags = parseCsv(tagsText);
+  const tagIds = await ensureTags(tx, tags);
+
+  await tx.mapCreator.deleteMany({ where: { mapId } });
+  await tx.mapTag.deleteMany({ where: { mapId } });
+
+  if (creators.length) {
+    await tx.mapCreator.createMany({
+      data: creators.map((name, index) => ({
+        mapId,
+        name,
+        sortOrder: index,
+      })),
+    });
+  }
+
+  if (tagIds.length) {
+    await tx.mapTag.createMany({
+      data: tagIds.map((tagId) => ({
+        mapId,
+        tagId,
+      })),
+      skipDuplicates: true,
+    });
+  }
+}
+
+function revalidateMapSurfaces(mapCode?: string) {
+  revalidatePath("/");
+  revalidatePath("/rankings");
+  revalidatePath("/legacy");
+  revalidatePath("/history");
+  revalidatePath("/admin");
+  revalidatePath("/admin/maps");
+
+  if (mapCode) {
+    revalidatePath(`/maps/${mapCode}`);
   }
 }
 
@@ -83,7 +192,6 @@ export async function submitRecordAction(formData: FormData) {
 
   const map = await prisma.map.findUnique({
     where: { id: parsed.data.mapId },
-    include: { acceptedRecords: true },
   });
 
   if (!map) {
@@ -174,6 +282,7 @@ export async function submitMapAction(formData: FormData) {
   }
 
   const parsed = mapSubmissionSchema.safeParse({
+    proposedMapCode: formData.get("proposedMapCode"),
     name: formData.get("name"),
     gameType: formData.get("gameType"),
     creatorText: formData.get("creatorText"),
@@ -217,6 +326,7 @@ export async function submitMapAction(formData: FormData) {
   await prisma.mapSubmission.create({
     data: {
       submittedById: session.user.id,
+      proposedMapCode: parsed.data.proposedMapCode,
       name: parsed.data.name,
       slug: slugify(parsed.data.name),
       gameType: parsed.data.gameType,
@@ -224,7 +334,7 @@ export async function submitMapAction(formData: FormData) {
       robloxUrl: parsed.data.robloxUrl,
       showcaseUrl: parsed.data.showcaseUrl,
       thumbnailUrl: parsed.data.thumbnailUrl,
-      estimatedDifficulty: parsed.data.estimatedDifficulty,
+      estimatedDifficulty: normalizeDifficultyScore(parsed.data.estimatedDifficulty),
       description: parsed.data.description,
       skillsetText: parsed.data.skillsetText,
       isTeamMap: parsed.data.isTeamMap,
@@ -237,12 +347,191 @@ export async function submitMapAction(formData: FormData) {
   redirect("/submit-map?status=success&message=Map+submitted+for+consideration.");
 }
 
-export async function reviewRecordSubmissionAction(formData: FormData) {
-  const session = await getAuthSession();
+export async function saveManagedMapAction(formData: FormData) {
+  const session = await requireStaffSession("/admin/maps");
 
-  if (!session?.user || !["MODERATOR", "ADMIN"].includes(session.user.role)) {
-    redirect("/login?callbackUrl=/admin/records");
+  if (!useDatabase) {
+    redirect("/admin/maps?message=Database+mode+required+for+map+management.");
   }
+
+  const parsed = managedMapSchema.safeParse({
+    id: formData.get("id"),
+    mapCode: formData.get("mapCode"),
+    name: formData.get("name"),
+    gameType: formData.get("gameType"),
+    status: formData.get("status"),
+    placement: formData.get("placement"),
+    difficultyScore: formData.get("difficultyScore"),
+    creatorText: formData.get("creatorText"),
+    shortDescription: formData.get("shortDescription"),
+    description: formData.get("description"),
+    thumbnailUrl: formData.get("thumbnailUrl"),
+    showcaseUrl: formData.get("showcaseUrl"),
+    robloxUrl: formData.get("robloxUrl"),
+    verifierStatus: formData.get("verifierStatus"),
+    tagsText: formData.get("tagsText"),
+    isTeamMap: getBooleanValue(formData, "isTeamMap"),
+    recordRequirementText: formData.get("recordRequirementText"),
+    minimumRecordPercent: formData.get("minimumRecordPercent"),
+  });
+
+  if (!parsed.success) {
+    redirect(
+      `/admin/maps?message=${encodeURIComponent(
+        parsed.error.issues[0]?.message ?? "Invalid map form.",
+      )}`,
+    );
+  }
+
+  if (parsed.data.status === "MAIN" && !parsed.data.placement) {
+    redirect("/admin/maps?message=Main+list+maps+must+have+a+placement.");
+  }
+
+  const difficultyScore = normalizeDifficultyScore(parsed.data.difficultyScore);
+  const placement =
+    parsed.data.status === "MAIN" ? parsed.data.placement ?? null : null;
+
+  const existing = parsed.data.id
+    ? await prisma.map.findUnique({ where: { id: parsed.data.id } })
+    : null;
+
+  const savedMap = await prisma.$transaction(async (tx) => {
+    const saved = parsed.data.id
+      ? await tx.map.update({
+          where: { id: parsed.data.id },
+          data: {
+            mapCode: parsed.data.mapCode,
+            slug: slugify(parsed.data.name),
+            name: parsed.data.name,
+            gameType: parsed.data.gameType,
+            status: parsed.data.status,
+            placement,
+            difficultyScore,
+            shortDescription: parsed.data.shortDescription,
+            description: parsed.data.description,
+            thumbnailUrl: parsed.data.thumbnailUrl,
+            bannerUrl: parsed.data.thumbnailUrl,
+            showcaseUrl: parsed.data.showcaseUrl,
+            robloxUrl: parsed.data.robloxUrl,
+            verifierStatus:
+              parsed.data.verifierStatus || getDifficultyLabel(difficultyScore),
+            isTeamMap: parsed.data.isTeamMap,
+            recordRequirementText: parsed.data.recordRequirementText,
+            minimumRecordPercent: parsed.data.minimumRecordPercent,
+            dateAdded: existing?.dateAdded ?? new Date(),
+            dateLastMoved: new Date(),
+          },
+        })
+      : await tx.map.create({
+          data: {
+            mapCode: parsed.data.mapCode,
+            slug: slugify(parsed.data.name),
+            name: parsed.data.name,
+            gameType: parsed.data.gameType,
+            status: parsed.data.status,
+            placement,
+            difficultyScore,
+            shortDescription: parsed.data.shortDescription,
+            description: parsed.data.description,
+            thumbnailUrl: parsed.data.thumbnailUrl,
+            bannerUrl: parsed.data.thumbnailUrl,
+            showcaseUrl: parsed.data.showcaseUrl,
+            robloxUrl: parsed.data.robloxUrl,
+            verifierStatus:
+              parsed.data.verifierStatus || getDifficultyLabel(difficultyScore),
+            isTeamMap: parsed.data.isTeamMap,
+            recordRequirementText: parsed.data.recordRequirementText,
+            minimumRecordPercent: parsed.data.minimumRecordPercent,
+            dateAdded: new Date(),
+            dateLastMoved: new Date(),
+          },
+        });
+
+    await syncMapRelations(tx, saved.id, parsed.data.creatorText, parsed.data.tagsText);
+
+    await tx.placementHistory.create({
+      data: {
+        mapId: saved.id,
+        oldPlacement: existing?.placement ?? null,
+        newPlacement: placement,
+        reason: existing ? "Updated by moderator" : "Created by moderator",
+      },
+    });
+
+    await tx.auditLog.create({
+      data: {
+        actorId: session.user.id,
+        action: existing ? "map.updated" : "map.created",
+        entityType: "Map",
+        entityId: saved.id,
+        summary: `${existing ? "Updated" : "Created"} ${parsed.data.mapCode}.`,
+      },
+    });
+
+    return saved;
+  });
+
+  revalidateMapSurfaces(savedMap.mapCode);
+  redirect("/admin/maps?message=Map+saved.");
+}
+
+export async function removeManagedMapAction(formData: FormData) {
+  const session = await requireStaffSession("/admin/maps");
+
+  if (!useDatabase) {
+    redirect("/admin/maps?message=Database+mode+required+for+map+management.");
+  }
+
+  const id = String(formData.get("id") ?? "");
+
+  if (!id) {
+    redirect("/admin/maps?message=Map+ID+is+required.");
+  }
+
+  const map = await prisma.map.findUnique({
+    where: { id },
+    select: { id: true, mapCode: true, placement: true },
+  });
+
+  if (!map) {
+    redirect("/admin/maps?message=Map+not+found.");
+  }
+
+  await prisma.$transaction([
+    prisma.map.update({
+      where: { id },
+      data: {
+        status: "REMOVED",
+        placement: null,
+        listMovement: 0,
+        dateLastMoved: new Date(),
+      },
+    }),
+    prisma.placementHistory.create({
+      data: {
+        mapId: id,
+        oldPlacement: map.placement,
+        newPlacement: null,
+        reason: "Removed by moderator",
+      },
+    }),
+    prisma.auditLog.create({
+      data: {
+        actorId: session.user.id,
+        action: "map.removed",
+        entityType: "Map",
+        entityId: id,
+        summary: `Removed ${map.mapCode} from the active roster.`,
+      },
+    }),
+  ]);
+
+  revalidateMapSurfaces(map.mapCode);
+  redirect("/admin/maps?message=Map+removed.");
+}
+
+export async function reviewRecordSubmissionAction(formData: FormData) {
+  const session = await requireStaffSession("/admin/records");
 
   if (!useDatabase) {
     redirect("/admin/records?message=Database+mode+required+for+moderation.");
@@ -365,11 +654,7 @@ export async function reviewRecordSubmissionAction(formData: FormData) {
 }
 
 export async function reviewMapSubmissionAction(formData: FormData) {
-  const session = await getAuthSession();
-
-  if (!session?.user || !["MODERATOR", "ADMIN"].includes(session.user.role)) {
-    redirect("/login?callbackUrl=/admin/maps");
-  }
+  const session = await requireStaffSession("/admin/maps");
 
   if (!useDatabase) {
     redirect("/admin/maps?message=Database+mode+required+for+moderation.");
@@ -388,42 +673,14 @@ export async function reviewMapSubmissionAction(formData: FormData) {
   }
 
   if (decision === "ACCEPT") {
-    await prisma.$transaction(async (tx) => {
-      await tx.mapSubmission.update({
-        where: { id: submission.id },
-        data: {
-          status: "ACCEPTED",
-          moderatorMessage,
-          reviewedById: session.user.id,
-          reviewedAt: new Date(),
-        },
-      });
+    const createdMapCode = await prisma.$transaction(async (tx) => {
+      const mapCode =
+        submission.proposedMapCode || (await getNextMapCode(tx, submission.gameType));
 
-      await tx.map.upsert({
-        where: { slug: submission.slug ?? slugify(submission.name) },
+      const savedMap = await tx.map.upsert({
+        where: { mapCode },
         update: {
-          description: submission.description,
-          shortDescription: submission.description.slice(0, 110),
-          thumbnailUrl: submission.thumbnailUrl,
-          showcaseUrl: submission.showcaseUrl,
-          robloxUrl: submission.robloxUrl,
-          verifierStatus: "Pending Verification",
-          isTeamMap: submission.isTeamMap,
-          difficultyScore: submission.estimatedDifficulty ?? 60,
-          status: "PENDING",
-          recordRequirementText:
-            "Raw footage preferred while the map is under initial review.",
-          minimumRecordPercent: submission.isTeamMap ? 55 : 60,
-          creators: {
-            deleteMany: {},
-            create: parseCsv(submission.creatorText).map((creator, index) => ({
-              name: creator,
-              sortOrder: index,
-            })),
-          },
-        },
-        create: {
-          slug: submission.slug ?? slugify(submission.name),
+          slug: slugify(submission.name),
           name: submission.name,
           gameType: submission.gameType,
           description: submission.description,
@@ -434,17 +691,55 @@ export async function reviewMapSubmissionAction(formData: FormData) {
           robloxUrl: submission.robloxUrl,
           verifierStatus: "Pending Verification",
           isTeamMap: submission.isTeamMap,
-          difficultyScore: submission.estimatedDifficulty ?? 60,
+          difficultyScore: normalizeDifficultyScore(
+            submission.estimatedDifficulty ?? 6,
+          ),
           status: "PENDING",
           recordRequirementText:
             "Raw footage preferred while the map is under initial review.",
           minimumRecordPercent: submission.isTeamMap ? 55 : 60,
-          creators: {
-            create: parseCsv(submission.creatorText).map((creator, index) => ({
-              name: creator,
-              sortOrder: index,
-            })),
-          },
+          dateLastMoved: new Date(),
+        },
+        create: {
+          mapCode,
+          slug: slugify(submission.name),
+          name: submission.name,
+          gameType: submission.gameType,
+          description: submission.description,
+          shortDescription: submission.description.slice(0, 110),
+          thumbnailUrl: submission.thumbnailUrl,
+          bannerUrl: submission.thumbnailUrl,
+          showcaseUrl: submission.showcaseUrl,
+          robloxUrl: submission.robloxUrl,
+          verifierStatus: "Pending Verification",
+          isTeamMap: submission.isTeamMap,
+          difficultyScore: normalizeDifficultyScore(
+            submission.estimatedDifficulty ?? 6,
+          ),
+          status: "PENDING",
+          recordRequirementText:
+            "Raw footage preferred while the map is under initial review.",
+          minimumRecordPercent: submission.isTeamMap ? 55 : 60,
+          dateAdded: new Date(),
+          dateLastMoved: new Date(),
+        },
+      });
+
+      await syncMapRelations(
+        tx,
+        savedMap.id,
+        submission.creatorText,
+        submission.skillsetText ?? undefined,
+      );
+
+      await tx.mapSubmission.update({
+        where: { id: submission.id },
+        data: {
+          status: "ACCEPTED",
+          moderatorMessage,
+          reviewedById: session.user.id,
+          reviewedAt: new Date(),
+          proposedMapCode: mapCode,
         },
       });
 
@@ -454,10 +749,14 @@ export async function reviewMapSubmissionAction(formData: FormData) {
           action: "map.accepted",
           entityType: "MapSubmission",
           entityId: submission.id,
-          summary: `Accepted ${submission.name} for list review.`,
+          summary: `Accepted ${submission.name} as ${mapCode}.`,
         },
       });
+
+      return mapCode;
     });
+
+    revalidateMapSurfaces(createdMapCode);
   } else {
     await prisma.$transaction([
       prisma.mapSubmission.update({

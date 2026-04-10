@@ -83,6 +83,7 @@ model PlayerProfile {
 
 model Map {
   id                    String             @id @default(cuid())
+  mapCode               String             @unique
   slug                  String             @unique
   name                  String             @unique
   gameType              GameType
@@ -201,6 +202,7 @@ model AcceptedRecord {
 model MapSubmission {
   id                String           @id @default(cuid())
   submittedById     String
+  proposedMapCode   String?
   name              String
   slug              String?
   gameType          GameType

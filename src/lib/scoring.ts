@@ -14,7 +14,8 @@ export function computeRecordPoints({
   isTeamMap = false,
 }: ScoreFormulaInput) {
   const placementWeight = Math.max(22, 165 - (placement - 1) * 3.8);
-  const difficultyMultiplier = 1 + difficultyScore / 260;
+  const normalizedDifficulty = Math.min(9.99, Math.max(6, difficultyScore));
+  const difficultyMultiplier = 1 + (normalizedDifficulty - 6) / 2.2;
   const percentMultiplier = isCompletion
     ? 1
     : Math.max(0.35, Math.min(0.96, percent / 100));

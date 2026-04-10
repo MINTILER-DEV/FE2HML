@@ -31,7 +31,12 @@ export default async function PlayerDetailPage({
           <div className="mt-8 grid gap-4 sm:grid-cols-2">
             {[
               ["Total points", data.player.totalPoints.toFixed(2)],
-              ["Hardest map", data.player.hardestMapName],
+              [
+                "Hardest map",
+                data.player.hardestMapCode
+                  ? `${data.player.hardestMapName} [${data.player.hardestMapCode}]`
+                  : data.player.hardestMapName,
+              ],
               ["Accepted records", data.player.totalAcceptedRecords],
               ["Joined", formatDate(data.player.joinedAt)],
             ].map(([label, value]) => (
@@ -69,21 +74,29 @@ export default async function PlayerDetailPage({
           Recent accepted records
         </p>
         <div className="mt-5 space-y-4">
-          {data.records.map((record) => (
-            <div
-              key={record.id}
-              className="flex flex-wrap items-center justify-between gap-3 rounded-3xl bg-white/[0.03] p-4"
-            >
-              <div>
-                <p className="font-medium text-slate-50">{record.mapName}</p>
-                <p className="text-sm text-slate-400">
-                  {record.isCompletion ? "Completion" : `${record.percent}% progress`} •{" "}
-                  {formatDate(record.createdAt)}
-                </p>
+          {data.records.length ? (
+            data.records.map((record) => (
+              <div
+                key={record.id}
+                className="flex flex-wrap items-center justify-between gap-3 rounded-3xl bg-white/[0.03] p-4"
+              >
+                <div>
+                  <p className="font-medium text-slate-50">
+                    {record.mapName} [{record.mapCode}]
+                  </p>
+                  <p className="text-sm text-slate-400">
+                    {record.isCompletion ? "Completion" : `${record.percent}% progress`} •{" "}
+                    {formatDate(record.createdAt)}
+                  </p>
+                </div>
+                <p className="font-medium text-cyan-200">{record.pointsAwarded} pts</p>
               </div>
-              <p className="font-medium text-cyan-200">{record.pointsAwarded} pts</p>
+            ))
+          ) : (
+            <div className="rounded-3xl border border-dashed border-white/10 bg-white/[0.03] p-8 text-center text-slate-400">
+              No accepted records yet.
             </div>
-          ))}
+          )}
         </div>
       </Card>
     </div>

@@ -32,6 +32,12 @@ export default async function SubmitMapPage({
         ) : null}
         <form action={submitMapAction} className="grid gap-5 lg:grid-cols-2">
           <div className="space-y-2">
+            <label className="text-sm text-slate-300" htmlFor="proposedMapCode">
+              Proposed map ID
+            </label>
+            <input className="h-11 w-full rounded-2xl border border-white/10 bg-slate-900/80 px-4 uppercase" id="proposedMapCode" name="proposedMapCode" placeholder="FE2-0001 or TRIA-0001" />
+          </div>
+          <div className="space-y-2">
             <label className="text-sm text-slate-300" htmlFor="name">
               Map name
             </label>
@@ -45,6 +51,12 @@ export default async function SubmitMapPage({
               <option value="FE2">FE2</option>
               <option value="TRIA">TRIA</option>
             </select>
+          </div>
+          <div className="space-y-2">
+            <label className="text-sm text-slate-300" htmlFor="estimatedDifficulty">
+              Difficulty
+            </label>
+            <input className="h-11 w-full rounded-2xl border border-white/10 bg-slate-900/80 px-4" defaultValue={6.5} id="estimatedDifficulty" max={9.99} min={6} name="estimatedDifficulty" step="0.01" type="number" />
           </div>
           <div className="space-y-2 lg:col-span-2">
             <label className="text-sm text-slate-300" htmlFor="creatorText">
@@ -71,12 +83,6 @@ export default async function SubmitMapPage({
             <input className="h-11 w-full rounded-2xl border border-white/10 bg-slate-900/80 px-4" id="thumbnailUrl" name="thumbnailUrl" />
           </div>
           <div className="space-y-2">
-            <label className="text-sm text-slate-300" htmlFor="estimatedDifficulty">
-              Estimated difficulty
-            </label>
-            <input className="h-11 w-full rounded-2xl border border-white/10 bg-slate-900/80 px-4" defaultValue={75} id="estimatedDifficulty" name="estimatedDifficulty" step="0.1" type="number" />
-          </div>
-          <div className="space-y-2 lg:col-span-2">
             <label className="text-sm text-slate-300" htmlFor="skillsetText">
               Skillset tags
             </label>

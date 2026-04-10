@@ -1,5 +1,12 @@
-import { GameType, MapStatus, SubmissionStatus, type AcceptedRecord, type Map } from "@prisma/client";
+import {
+  GameType,
+  MapStatus,
+  SubmissionStatus,
+  type AcceptedRecord,
+  type Map,
+} from "@prisma/client";
 
+import { getDifficultyLabel, normalizeDifficultyScore } from "@/lib/difficulty";
 import { mockData } from "@/lib/data/mock";
 import { prisma } from "@/lib/prisma";
 import type {
@@ -24,14 +31,18 @@ function normalizeMap(
     _count?: { acceptedRecords: number };
   },
 ): MapView {
+  const difficultyScore = normalizeDifficultyScore(map.difficultyScore);
+
   return {
     id: map.id,
+    mapCode: map.mapCode,
     slug: map.slug,
     name: map.name,
     gameType: map.gameType,
     status: map.status,
     placement: map.placement,
-    difficultyScore: map.difficultyScore,
+    difficultyScore,
+    difficultyLabel: getDifficultyLabel(difficultyScore),
     creators: map.creators.map((creator) => creator.name),
     shortDescription: map.shortDescription ?? "Competitive map listing entry.",
     description: map.description,
@@ -55,7 +66,7 @@ function normalizeMap(
 function normalizeRecord(
   record: AcceptedRecord & {
     player: { slug: string; username: string };
-    map: { slug: string; name: string; gameType: GameType };
+    map: { mapCode: string; name: string; gameType: GameType };
     teammates: { displayName: string }[];
   },
 ): RecordView {
@@ -63,7 +74,7 @@ function normalizeRecord(
     id: record.id,
     playerSlug: record.player.slug,
     playerName: record.player.username,
-    mapSlug: record.map.slug,
+    mapCode: record.map.mapCode,
     mapName: record.map.name,
     gameType: record.map.gameType,
     percent: record.percent,
@@ -157,6 +168,7 @@ export async function getRankingMaps({
 
     return (
       map.name.toLowerCase().includes(term) ||
+      map.mapCode.toLowerCase().includes(term) ||
       map.creators.some((creator) => creator.toLowerCase().includes(term)) ||
       map.tags.some((tag) => tag.toLowerCase().includes(term))
     );
@@ -192,34 +204,46 @@ export async function getRankingMaps({
   }
 }
 
-export async function getMapBySlug(slug: string) {
+export async function getManagedMaps(): Promise<MapView[]> {
   if (!useDatabase) {
-    const map = mockData.maps.find((entry) => entry.slug === slug);
+    return mockData.maps;
+  }
+
+  try {
+    const maps = await prisma.map.findMany({
+      include: {
+        creators: { orderBy: { sortOrder: "asc" } },
+        tags: { include: { tag: true } },
+        _count: { select: { acceptedRecords: true } },
+      },
+      orderBy: [{ status: "asc" }, { placement: "asc" }, { createdAt: "desc" }],
+    });
+
+    return maps.map(normalizeMap);
+  } catch {
+    return mockData.maps;
+  }
+}
+
+function emptyMapHistory() {
+  return [] as { label: string; placement: number; capturedAt: string }[];
+}
+
+export async function getMapByCode(mapCode: string) {
+  if (!useDatabase) {
+    const map = mockData.maps.find((entry) => entry.mapCode === mapCode);
     if (!map) return null;
 
     return {
       map,
-      records: mockData.acceptedRecords.filter((record) => record.mapSlug === slug),
-      history: mockData.snapshots
-        .flatMap((snapshot) =>
-          snapshot.leaders
-            .filter((leader) => leader.mapSlug === slug)
-            .map((leader) => ({
-              label: snapshot.title,
-              placement: leader.placement,
-              capturedAt: snapshot.capturedAt,
-            })),
-        )
-        .sort(
-          (left, right) =>
-            new Date(right.capturedAt).getTime() - new Date(left.capturedAt).getTime(),
-        ),
+      records: mockData.acceptedRecords.filter((record) => record.mapCode === mapCode),
+      history: emptyMapHistory(),
     };
   }
 
   try {
     const map = await prisma.map.findUnique({
-      where: { slug },
+      where: { mapCode },
       include: {
         creators: { orderBy: { sortOrder: "asc" } },
         tags: { include: { tag: true } },
@@ -250,26 +274,13 @@ export async function getMapBySlug(slug: string) {
       })),
     };
   } catch {
-    const map = mockData.maps.find((entry) => entry.slug === slug);
+    const map = mockData.maps.find((entry) => entry.mapCode === mapCode);
     if (!map) return null;
 
     return {
       map,
-      records: mockData.acceptedRecords.filter((record) => record.mapSlug === slug),
-      history: mockData.snapshots
-        .flatMap((snapshot) =>
-          snapshot.leaders
-            .filter((leader) => leader.mapSlug === slug)
-            .map((leader) => ({
-              label: snapshot.title,
-              placement: leader.placement,
-              capturedAt: snapshot.capturedAt,
-            })),
-        )
-        .sort(
-          (left, right) =>
-            new Date(right.capturedAt).getTime() - new Date(left.capturedAt).getTime(),
-        ),
+      records: mockData.acceptedRecords.filter((record) => record.mapCode === mapCode),
+      history: emptyMapHistory(),
     };
   }
 }
@@ -303,8 +314,8 @@ export async function getPlayers(): Promise<PlayerView[]> {
         slug: player.slug,
         username: player.username,
         totalPoints: player.totalPoints,
-        hardestMapSlug: player.hardestMap?.slug ?? mockData.activeMaps[0].slug,
-        hardestMapName: player.hardestMap?.name ?? mockData.activeMaps[0].name,
+        hardestMapCode: player.hardestMap?.mapCode,
+        hardestMapName: player.hardestMap?.name ?? "No accepted records yet",
         totalAcceptedRecords: player.acceptedRecords.length,
         fe2RecordCount,
         triaRecordCount,
@@ -349,12 +360,7 @@ export async function getPlayerBySlug(slug: string) {
 
 export async function getLatestAcceptedRecords(): Promise<RecordView[]> {
   if (!useDatabase) {
-    return [...mockData.acceptedRecords]
-      .sort(
-        (left, right) =>
-          new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime(),
-      )
-      .slice(0, 8);
+    return mockData.acceptedRecords.slice(0, 8);
   }
 
   try {
@@ -370,12 +376,7 @@ export async function getLatestAcceptedRecords(): Promise<RecordView[]> {
 
     return records.map(normalizeRecord);
   } catch {
-    return [...mockData.acceptedRecords]
-      .sort(
-        (left, right) =>
-          new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime(),
-      )
-      .slice(0, 8);
+    return mockData.acceptedRecords.slice(0, 8);
   }
 }
 
@@ -434,10 +435,13 @@ export async function getModeratorDashboardData(): Promise<{
       })),
       pendingMaps: mapSubmissions.map((submission) => ({
         id: submission.id,
+        proposedMapCode: submission.proposedMapCode ?? undefined,
         name: submission.name,
         gameType: submission.gameType,
         creatorText: submission.creatorText,
-        estimatedDifficulty: submission.estimatedDifficulty ?? 0,
+        estimatedDifficulty: normalizeDifficultyScore(
+          submission.estimatedDifficulty ?? 6,
+        ),
         status: submission.status,
         createdAt: submission.createdAt.toISOString(),
       })),
@@ -450,7 +454,7 @@ export async function getModeratorDashboardData(): Promise<{
         leaders: snapshot.entries.map((entry) => ({
           placement: entry.placement ?? 0,
           mapName: entry.map.name,
-          mapSlug: entry.map.slug,
+          mapCode: entry.map.mapCode,
           gameType: entry.gameType,
         })),
       })),
@@ -484,8 +488,8 @@ export async function getHomeData() {
       registeredPlayers: players.length,
     },
     featuredMaps: {
-      fe2: fe2Maps[0],
-      tria: triaMaps[0],
+      fe2: fe2Maps[0] ?? null,
+      tria: triaMaps[0] ?? null,
     },
     latestRecords,
     latestChanges: maps
@@ -493,7 +497,7 @@ export async function getHomeData() {
       .slice(0, 6)
       .map((map) => ({
         mapName: map.name,
-        mapSlug: map.slug,
+        mapCode: map.mapCode,
         movement: map.listMovement,
         updatedAt: map.dateLastMoved,
       })),

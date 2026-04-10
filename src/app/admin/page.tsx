@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 
 import { Card } from "@/components/ui/card";
 import { getAuthSession } from "@/lib/auth";
-import { getModeratorDashboardData } from "@/lib/data/site";
+import { getManagedMaps, getModeratorDashboardData } from "@/lib/data/site";
 
 export default async function AdminDashboardPage() {
   const session = await getAuthSession();
@@ -16,7 +16,10 @@ export default async function AdminDashboardPage() {
     redirect("/");
   }
 
-  const data = await getModeratorDashboardData();
+  const [data, managedMaps] = await Promise.all([
+    getModeratorDashboardData(),
+    getManagedMaps(),
+  ]);
 
   return (
     <div className="page-shell space-y-8">
@@ -27,8 +30,9 @@ export default async function AdminDashboardPage() {
         <h1 className="text-4xl font-semibold text-slate-50">Admin Dashboard</h1>
       </div>
 
-      <div className="grid gap-6 md:grid-cols-3">
+      <div className="grid gap-6 md:grid-cols-4">
         {[
+          ["Managed maps", managedMaps.length, "/admin/maps"],
           ["Pending records", data.pendingRecords.length, "/admin/records"],
           ["Pending maps", data.pendingMaps.length, "/admin/maps"],
           ["Snapshots", data.snapshots.length, "/history"],
