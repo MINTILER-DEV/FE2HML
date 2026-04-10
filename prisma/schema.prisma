@@ -1,0 +1,355 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  USER
+  MODERATOR
+  ADMIN
+}
+
+enum GameType {
+  FE2
+  TRIA
+}
+
+enum MapStatus {
+  MAIN
+  LEGACY
+  REMOVED
+  PENDING
+}
+
+enum SubmissionStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+}
+
+enum AnnouncementSeverity {
+  INFO
+  SUCCESS
+  WARNING
+}
+
+model User {
+  id                    String             @id @default(cuid())
+  name                  String?
+  email                 String             @unique
+  emailVerified         DateTime?
+  image                 String?
+  hashedPassword        String?
+  role                  Role               @default(USER)
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
+  playerProfile         PlayerProfile?
+  accounts              Account[]
+  sessions              Session[]
+  recordSubmissions     RecordSubmission[] @relation("SubmittedRecords")
+  mapSubmissions        MapSubmission[]    @relation("SubmittedMaps")
+  reviewedRecords       RecordSubmission[] @relation("ReviewedRecords")
+  reviewedMaps          MapSubmission[]    @relation("ReviewedMaps")
+  auditLogs             AuditLog[]         @relation("AuditActor")
+  moderatorNotes        ModeratorNote[]    @relation("ModeratorNoteAuthor")
+  announcementsAuthored Announcement[]     @relation("AnnouncementAuthor")
+  listSnapshots         ListSnapshot[]     @relation("SnapshotAuthor")
+}
+
+model PlayerProfile {
+  id               String            @id @default(cuid())
+  userId           String?           @unique
+  slug             String            @unique
+  username         String            @unique
+  region           String?
+  avatarUrl        String?
+  joinedAt         DateTime          @default(now())
+  totalPoints      Float             @default(0)
+  hardestMapId     String?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  user             User?             @relation(fields: [userId], references: [id], onDelete: SetNull)
+  hardestMap       Map?              @relation("HardestMap", fields: [hardestMapId], references: [id], onDelete: SetNull)
+  acceptedRecords  AcceptedRecord[]
+  recordSubmissions RecordSubmission[]
+  teammates        RecordTeammate[]
+
+  @@index([totalPoints(sort: Desc)])
+}
+
+model Map {
+  id                    String             @id @default(cuid())
+  slug                  String             @unique
+  name                  String             @unique
+  gameType              GameType
+  status                MapStatus          @default(PENDING)
+  placement             Int?
+  difficultyScore       Float
+  shortDescription      String?
+  description           String
+  thumbnailUrl          String?
+  bannerUrl             String?
+  showcaseUrl           String?
+  robloxUrl             String?
+  verifierStatus        String?
+  isTeamMap             Boolean            @default(false)
+  recordRequirementText String
+  minimumRecordPercent  Int                @default(100)
+  listMovement          Int                @default(0)
+  dateAdded             DateTime?
+  dateLastMoved         DateTime?
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
+  creators              MapCreator[]
+  tags                  MapTag[]
+  acceptedRecords       AcceptedRecord[]
+  recordSubmissions     RecordSubmission[]
+  placementHistory      PlacementHistory[]
+  moderatorNotes        ModeratorNote[]    @relation("MapNotes")
+  hardestForPlayers     PlayerProfile[]    @relation("HardestMap")
+  snapshotEntries       SnapshotEntry[]
+
+  @@index([gameType, status, placement(sort: Asc)])
+  @@index([slug, status])
+}
+
+model MapCreator {
+  id        String   @id @default(cuid())
+  mapId      String
+  name      String
+  roleLabel String?
+  sortOrder Int      @default(0)
+  map       Map      @relation(fields: [mapId], references: [id], onDelete: Cascade)
+
+  @@unique([mapId, name])
+}
+
+model Tag {
+  id        String   @id @default(cuid())
+  slug      String   @unique
+  label     String
+  category  String?
+  createdAt DateTime @default(now())
+  maps      MapTag[]
+}
+
+model MapTag {
+  mapId String
+  tagId String
+  map   Map @relation(fields: [mapId], references: [id], onDelete: Cascade)
+  tag   Tag @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([mapId, tagId])
+}
+
+model RecordSubmission {
+  id               String           @id @default(cuid())
+  submittedById    String
+  playerId         String?
+  mapId            String
+  percent          Int
+  isCompletion     Boolean          @default(false)
+  proofUrl         String
+  rawFootageUrl    String?
+  notes            String?
+  platform         String?
+  teammatesText    String?
+  status           SubmissionStatus @default(PENDING)
+  moderatorMessage String?
+  reviewedById     String?
+  createdAt        DateTime         @default(now())
+  reviewedAt       DateTime?
+  updatedAt        DateTime         @updatedAt
+  submittedBy      User             @relation("SubmittedRecords", fields: [submittedById], references: [id], onDelete: Cascade)
+  player           PlayerProfile?   @relation(fields: [playerId], references: [id], onDelete: SetNull)
+  map              Map              @relation(fields: [mapId], references: [id], onDelete: Cascade)
+  reviewedBy       User?            @relation("ReviewedRecords", fields: [reviewedById], references: [id], onDelete: SetNull)
+  acceptedRecord   AcceptedRecord?
+  teammates        RecordTeammate[]
+  moderatorNotes   ModeratorNote[]  @relation("RecordSubmissionNotes")
+
+  @@index([status, createdAt(sort: Desc)])
+  @@index([submittedById, createdAt(sort: Desc)])
+}
+
+model AcceptedRecord {
+  id                         String           @id @default(cuid())
+  playerId                   String
+  mapId                      String
+  submissionId               String?          @unique
+  percent                    Int
+  isCompletion               Boolean          @default(false)
+  proofUrl                   String
+  rawFootageUrl              String?
+  placementAtTimeOfAcceptance Int
+  pointsAwarded              Float
+  createdAt                  DateTime         @default(now())
+  updatedAt                  DateTime         @updatedAt
+  player                     PlayerProfile    @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  map                        Map              @relation(fields: [mapId], references: [id], onDelete: Cascade)
+  submission                 RecordSubmission? @relation(fields: [submissionId], references: [id], onDelete: SetNull)
+  teammates                  RecordTeammate[]
+
+  @@index([mapId, createdAt(sort: Desc)])
+  @@index([playerId, createdAt(sort: Desc)])
+}
+
+model MapSubmission {
+  id                String           @id @default(cuid())
+  submittedById     String
+  name              String
+  slug              String?
+  gameType          GameType
+  creatorText       String
+  robloxUrl         String?
+  showcaseUrl       String?
+  thumbnailUrl      String?
+  estimatedDifficulty Float?
+  description       String
+  notes             String?
+  isTeamMap         Boolean          @default(false)
+  skillsetText      String?
+  status            SubmissionStatus @default(PENDING)
+  moderatorMessage  String?
+  reviewedById      String?
+  createdAt         DateTime         @default(now())
+  reviewedAt        DateTime?
+  updatedAt         DateTime         @updatedAt
+  submittedBy       User             @relation("SubmittedMaps", fields: [submittedById], references: [id], onDelete: Cascade)
+  reviewedBy        User?            @relation("ReviewedMaps", fields: [reviewedById], references: [id], onDelete: SetNull)
+  moderatorNotes    ModeratorNote[]  @relation("MapSubmissionNotes")
+
+  @@index([status, createdAt(sort: Desc)])
+}
+
+model ListSnapshot {
+  id          String          @id @default(cuid())
+  slug        String          @unique
+  title       String
+  summary     String?
+  capturedAt  DateTime
+  createdAt   DateTime        @default(now())
+  createdById String?
+  createdBy   User?           @relation("SnapshotAuthor", fields: [createdById], references: [id], onDelete: SetNull)
+  entries     SnapshotEntry[]
+}
+
+model SnapshotEntry {
+  snapshotId       String
+  mapId            String
+  placement        Int?
+  status           MapStatus
+  difficultyScore  Float
+  gameType         GameType
+  snapshot         ListSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+  map              Map          @relation(fields: [mapId], references: [id], onDelete: Cascade)
+
+  @@id([snapshotId, mapId])
+  @@index([gameType, placement(sort: Asc)])
+}
+
+model PlacementHistory {
+  id          String   @id @default(cuid())
+  mapId        String
+  oldPlacement Int?
+  newPlacement Int?
+  reason       String?
+  changedAt    DateTime @default(now())
+  map          Map      @relation(fields: [mapId], references: [id], onDelete: Cascade)
+
+  @@index([mapId, changedAt(sort: Desc)])
+}
+
+model Announcement {
+  id          String               @id @default(cuid())
+  slug        String               @unique
+  title       String
+  body        String
+  severity    AnnouncementSeverity @default(INFO)
+  isPinned    Boolean              @default(false)
+  publishedAt DateTime             @default(now())
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+  authorId    String?
+  author      User?                @relation("AnnouncementAuthor", fields: [authorId], references: [id], onDelete: SetNull)
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  actorId    String?
+  action     String
+  entityType String
+  entityId   String
+  summary    String
+  metadata   Json?
+  createdAt  DateTime @default(now())
+  actor      User?    @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([entityType, entityId])
+  @@index([createdAt(sort: Desc)])
+}
+
+model ModeratorNote {
+  id                 String            @id @default(cuid())
+  authorId           String
+  mapId              String?
+  recordSubmissionId String?
+  mapSubmissionId    String?
+  content            String
+  isInternal         Boolean           @default(true)
+  createdAt          DateTime          @default(now())
+  author             User              @relation("ModeratorNoteAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  map                Map?              @relation("MapNotes", fields: [mapId], references: [id], onDelete: Cascade)
+  recordSubmission   RecordSubmission? @relation("RecordSubmissionNotes", fields: [recordSubmissionId], references: [id], onDelete: Cascade)
+  mapSubmission      MapSubmission?    @relation("MapSubmissionNotes", fields: [mapSubmissionId], references: [id], onDelete: Cascade)
+}
+
+model RecordTeammate {
+  id                 String            @id @default(cuid())
+  acceptedRecordId   String?
+  recordSubmissionId String?
+  playerId           String?
+  displayName        String
+  sortOrder          Int               @default(0)
+  acceptedRecord     AcceptedRecord?   @relation(fields: [acceptedRecordId], references: [id], onDelete: Cascade)
+  recordSubmission   RecordSubmission? @relation(fields: [recordSubmissionId], references: [id], onDelete: Cascade)
+  player             PlayerProfile?    @relation(fields: [playerId], references: [id], onDelete: SetNull)
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
